@@ -8,6 +8,7 @@
 		"start": "npx vite-node src/index.ts",
 		"prettier": "prettier --write ."
 	},
+
 	"license": "MIT",
 	"dependencies": {
 		"@clack/prompts": "^0.4.3",
