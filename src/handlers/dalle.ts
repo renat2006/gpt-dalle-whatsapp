@@ -1,7 +1,12 @@
 import { MessageMedia } from "whatsapp-web.js";
 import { openai } from "../providers/openai";
-
+import { aiConfig } from "../handlers/ai-config";
+import { CreateImageRequestSizeEnum } from "openai";
+import config from "../config";
 import * as cli from "../cli/ui";
+
+// Moderation
+import { moderateIncomingPrompt } from "./moderation";
 
 const handleMessageDALLE = async (message: any, prompt: any) => {
 	try {
@@ -9,18 +14,28 @@ const handleMessageDALLE = async (message: any, prompt: any) => {
 
 		cli.print(`[DALL-E] Received prompt from ${message.from}: ${prompt}`);
 
+		// Prompt Moderation
+		if (config.promptModerationEnabled) {
+			try {
+				await moderateIncomingPrompt(prompt);
+			} catch (error: any) {
+				message.reply(error.message);
+				return;
+			}
+		}
+
 		// Send the prompt to the API
 		const response = await openai.createImage({
 			prompt: prompt,
 			n: 1,
-			size: "512x512",
+			size: aiConfig.dalle.size as CreateImageRequestSizeEnum,
 			response_format: "b64_json"
 		});
 
 		const end = Date.now() - start;
 
 		const base64 = response.data.data[0].b64_json as string;
-		const image = await new MessageMedia("image/jpeg", base64, "image.jpg");
+		const image = new MessageMedia("image/jpeg", base64, "image.jpg");
 
 		cli.print(`[DALL-E] Answer to ${message.from} | OpenAI request took ${end}ms`);
 

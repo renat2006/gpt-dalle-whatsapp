@@ -1,70 +1,69 @@
 import qrcode from "qrcode-terminal";
-import { Client, Message, Events } from "whatsapp-web.js";
-import { startsWithIgnoreCase } from "./utils";
+import { Client, Message, Events, LocalAuth } from "whatsapp-web.js";
 
-// Config & Constants
-import config from "./config";
+// Constants
 import constants from "./constants";
 
-// ChatGPT & DALLE
-import { handleMessageGPT } from "./handlers/gpt";
-import { handleMessageDALLE } from "./handlers/dalle";
-
+// CLI
 import * as cli from "./cli/ui";
+import { handleIncomingMessage } from "./handlers/message";
 
-// Whatsapp Client
-const client = new Client({
-	puppeteer: {
-		args: ["--no-sandbox"]
-	}
-});
+// Config
+import { initAiConfig } from "./handlers/ai-config";
+import { initOpenAI } from "./providers/openai";
 
-// Handles message
-async function handleIncomingMessage(message: Message) {
-	const messageString = message.body;
-
-	if (!config.prefixEnabled) {
-		// GPT (only <prompt>)
-		await handleMessageGPT(message, messageString);
-		return;
-	}
-
-	// GPT (!gpt <prompt>)
-	if (startsWithIgnoreCase(messageString, config.gptPrefix)) {
-		const prompt = messageString.substring(config.gptPrefix.length + 1);
-		await handleMessageGPT(message, prompt);
-		return;
-	}
-
-	// DALLE (!dalle <prompt>)
-	if (startsWithIgnoreCase(messageString, config.dallePrefix)) {
-		const prompt = messageString.substring(config.dallePrefix.length + 1);
-		await handleMessageDALLE(message, prompt);
-		return;
-	}
-}
+// Ready timestamp of the bot
+let botReadyTimestamp: Date | null = null;
 
 // Entrypoint
 const start = async () => {
 	cli.printIntro();
 
-	// Whatsapp auth
+	// WhatsApp Client
+	const client = new Client({
+		puppeteer: {
+			args: ["--no-sandbox"]
+		},
+		authStrategy: new LocalAuth({
+			clientId: undefined,
+			dataPath: constants.sessionPath
+		})
+	});
+
+	// WhatsApp auth
 	client.on(Events.QR_RECEIVED, (qr: string) => {
 		qrcode.generate(qr, { small: true }, (qrcode: string) => {
 			cli.printQRCode(qrcode);
 		});
 	});
 
-	// Whatsapp loading
+	// WhatsApp loading
 	client.on(Events.LOADING_SCREEN, (percent) => {
 		if (percent == "0") {
 			cli.printLoading();
 		}
 	});
 
-	// Whatsapp ready
+	// WhatsApp authenticated
+	client.on(Events.AUTHENTICATED, () => {
+		cli.printAuthenticated();
+	});
+
+	// WhatsApp authentication failure
+	client.on(Events.AUTHENTICATION_FAILURE, () => {
+		cli.printAuthenticationFailure();
+	});
+
+	// WhatsApp ready
 	client.on(Events.READY, () => {
+		// Print outro
 		cli.printOutro();
+
+		// Set bot ready timestamp
+		botReadyTimestamp = new Date();
+
+		initAiConfig();
+		initOpenAI();
 	});
 
 	// WhatsApp message
@@ -72,11 +71,7 @@ const start = async () => {
 		// Ignore if message is from status broadcast
 		if (message.from == constants.statusBroadcast) return;
 
-		// Ignore if message is empty or media
-		if (message.body.length == 0) return;
-		if (message.hasMedia) return;
-
-		// Ignore if it's a quoted message, (e.g. GPT reply)
+		// Ignore if it's a quoted message, (e.g. Bot reply)
 		if (message.hasQuotedMsg) return;
 
 		await handleIncomingMessage(message);
@@ -87,11 +82,7 @@ const start = async () => {
 		// Ignore if message is from status broadcast
 		if (message.from == constants.statusBroadcast) return;
 
-		// Ignore if message is empty or media
-		if (message.body.length == 0) return;
-		if (message.hasMedia) return;
-
-		// Ignore if it's a quoted message, (e.g. GPT reply)
+		// Ignore if it's a quoted message, (e.g. Bot reply)
 		if (message.hasQuotedMsg) return;
 
 		// Ignore if it's not from me
@@ -100,8 +91,10 @@ const start = async () => {
 		await handleIncomingMessage(message);
 	});
 
-	// Whatsapp initialization
+	// WhatsApp initialization
 	client.initialize();
 };
 
 start();
+
+export { botReadyTimestamp };
